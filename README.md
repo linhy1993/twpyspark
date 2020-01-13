@@ -5,3 +5,6 @@ TODO List
 - [x] Get 1000 tweets of each topic
 - [x] Clean tweets
 - [ ] Sentiment Analysis
+
+Setup pySpark ENV in pycharm
+check [url](https://stackoverflow.com/a/34714207)
