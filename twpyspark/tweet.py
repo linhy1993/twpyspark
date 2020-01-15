@@ -3,11 +3,12 @@ import re
 
 import tweepy
 from pyspark.sql import SparkSession
+from pyspark.sql.functions import udf
 from pyspark.sql.types import *
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 from twpyspark.settings import Config
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-from pyspark.sql.functions import udf
+from twpyspark.visualize import visualize
 
 
 def decontracted(phrase):
@@ -51,10 +52,10 @@ class TwitterApi(object):
         return top_topic[:top] if top else top_topic
 
     def get_tweets_of_topic(self, topic, count=10):
-        tweets_status = self.api.search(q=topic, count=count)
-        tweets = [
-            {"topic": topic, "tweet": _clean_tweet(tw.text)} for tw in tweets_status if tw.lang == "en"
-        ]
+        tweets_status = self.api.search(q=topic + " -filter:retweets", count=count, lang='en')
+        if len(tweets_status) != count:
+            tweets_status = self.api.search(q=topic, count=count, lang='en')
+        tweets = [{"topic": topic, "tweet": _clean_tweet(tw.text)} for tw in tweets_status]
         return tweets
 
 
@@ -72,29 +73,48 @@ def get_sentimment(sentence: str, analyzer: SentimentIntensityAnalyzer):
     score = analyzer.polarity_scores(sentence)
     compound = score['compound']
     if compound >= 0.1:
-        return 1
+        return 1  # positive
     elif (compound > -0.1) and (compound < 0.1):
-        return 0
+        return 0  # nuture
     else:
-        return -1
+        return -1  # negative
 
 
 def main():
     twitter_api = TwitterApi()
-    topics = twitter_api.get_topic_of_trends(woeid=3534, top=10)
+    topics = twitter_api.get_topic_of_trends(woeid=Config.WOEID, top=Config.TWEETS_TOP_TOPIC)  # 3534 is Canada
     topics_tweets = []
     for topic in topics:
-        topics_tweets.extend(twitter_api.get_tweets_of_topic(topic, count=10))
+        topics_tweets.extend(twitter_api.get_tweets_of_topic(topic, count=Config.TWEETS_COUNT))
 
     schema = StructType([StructField("topic", StringType(), True), StructField("tweet", StringType(), True)])
     spark = SparkSession.builder.master("local").appName("Twitter Sentiment Analysis").getOrCreate()
-    df = spark.createDataFrame(topics_tweets, schema=schema) \
-        .dropDuplicates(subset=['tweet'])
+    df = spark.createDataFrame(topics_tweets, schema=schema)
     # sentiment
     analyzer = SentimentIntensityAnalyzer()
     sentiment_udf = udf(lambda tweet: get_sentimment(tweet, analyzer), IntegerType())
     sentiment_df = df.withColumn("sentiment", sentiment_udf(df.tweet)).orderBy(df.topic.desc())
     sentiment_df.show(n=50, truncate=False)
+
+    # each topic's sentiment count
+    from pyspark.sql import functions as F
+    sentiment_count_by_topic = sentiment_df \
+        .groupBy("topic") \
+        .pivot("sentiment") \
+        .agg(F.count("sentiment")) \
+        .na.fill(0)
+    sentiment_count_by_topic = sentiment_count_by_topic \
+        .select(F.col("topic"),
+                F.col("-1").alias("negative"),
+                F.col("0").alias("neutral"),
+                F.col("1").alias("positive"))
+    sentiment_count_by_topic.show()
+
+    # visualization
+    sentiment_count_by_topic_dict = {r['topic']: [r['negative'], r['neutral'], r['positive']]
+                                     for r in sentiment_count_by_topic.collect()}
+    category_names = sentiment_count_by_topic.columns[1:]
+    visualize(sentiment_count_by_topic_dict, category_names)
 
 
 if __name__ == "__main__":
