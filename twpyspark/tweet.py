@@ -10,7 +10,24 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from pyspark.sql.functions import udf
 
 
+def decontracted(phrase):
+    # specific
+    phrase = re.sub(r"won\'t", "will not", phrase)
+    phrase = re.sub(r"can\'t", "can not", phrase)
+    # general
+    phrase = re.sub(r"n\'t", " not", phrase)
+    phrase = re.sub(r"\'re", " are", phrase)
+    phrase = re.sub(r"\'s", " is", phrase)
+    phrase = re.sub(r"\'d", " would", phrase)
+    phrase = re.sub(r"\'ll", " will", phrase)
+    phrase = re.sub(r"\'t", " not", phrase)
+    phrase = re.sub(r"\'ve", " have", phrase)
+    phrase = re.sub(r"\'m", " am", phrase)
+    return phrase
+
+
 def _clean_tweet(tweet):
+    tweet = decontracted(tweet)
     tweet = re.sub(r"@[A-Za-z0-9]+", "", tweet)  # remove @person
     tweet = re.sub(r"https?://[A-Za-z0-9./]+", "", tweet)  # remove url
     tweet = re.sub("[^a-zA-Z]", " ", tweet)  # only save numbers and characters
@@ -74,9 +91,9 @@ def main():
     df = spark.createDataFrame(topics_tweets, schema=schema) \
         .dropDuplicates(subset=['tweet'])
     # sentiment
-    sentiment_udf = udf(lambda tweet: get_sentimment(tweet, analyzer), IntegerType())
     analyzer = SentimentIntensityAnalyzer()
-    sentiment_df = df.withColumn("sentiment", sentiment_udf(df.tweet))
+    sentiment_udf = udf(lambda tweet: get_sentimment(tweet, analyzer), IntegerType())
+    sentiment_df = df.withColumn("sentiment", sentiment_udf(df.tweet)).orderBy(df.topic.desc())
     sentiment_df.show(n=50, truncate=False)
 
 
