@@ -7,5 +7,8 @@ TODO List
 - [x] Sentiment Analysis
 - [x] Visualization
 
+TODO:
+- [] Change to stream
+
 Setup pySpark ENV in pycharm
 check [url](https://stackoverflow.com/a/34714207)
